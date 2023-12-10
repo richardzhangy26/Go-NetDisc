@@ -40,7 +40,8 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		newFile.Seek(0, 0)
 		fileMeta.Filesha1 = util.FileSha1(newFile)
 		fmt.Printf("fileMeta.filesha1: %v\n", fileMeta.Filesha1)
-		meta.UpdateFileMeta(fileMeta)
+		// meta.UpdateFileMeta(fileMeta)
+		_ = meta.UpdateFileMetaDB(fileMeta)
 		http.Redirect(w, r, "/file/upload/suc", http.StatusFound)
 
 	} else if r.Method == "GET" {
@@ -57,11 +58,18 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 func UploadsucHandler(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "上传成功")
 }
+
+// 获取文件元信息
 func GetFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	filehash := r.Form["filehash"][0]
 	fmt.Printf("filehash: %s\n", filehash)
-	fMeta := meta.GetFileMeta(filehash)
+	// fMeta := meta.GetFileMeta(filehash)
+	fMeta, err := meta.GetFileMetaDB(filehash)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	data, err := json.Marshal(fMeta)
 	fmt.Println(string(data))
 	if err != nil {
