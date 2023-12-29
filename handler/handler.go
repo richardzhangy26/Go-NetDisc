@@ -3,11 +3,13 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	dblayer "go-netdisc/db"
 	"go-netdisc/meta"
 	"go-netdisc/util"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -42,7 +44,14 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("fileMeta.filesha1: %v\n", fileMeta.Filesha1)
 		// meta.UpdateFileMeta(fileMeta)
 		_ = meta.UpdateFileMetaDB(fileMeta)
-		http.Redirect(w, r, "/file/upload/suc", http.StatusFound)
+		r.ParseForm()
+		username := r.Form.Get("username")
+		suc := dblayer.OnUserFileUploadFinished(username, fileMeta.Filesha1, fileMeta.FileName, fileMeta.FileSize)
+		if suc {
+			http.Redirect(w, r, "/static/view/home.html", http.StatusFound)
+		} else {
+			w.Write([]byte("upload filed"))
+		}
 
 	} else if r.Method == "GET" {
 		//返回上传html页面
@@ -78,6 +87,21 @@ func GetFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(data)
 
+}
+func FileQueryHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	limitCnt, _ := strconv.Atoi(r.Form.Get("limit"))
+	username := r.Form.Get("username")
+	userFiles, err := dblayer.QueryUserFileMetas(username, limitCnt)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	data, err := json.Marshal(userFiles)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.Write(data)
+	}
 }
 
 // 下载处理handler
@@ -128,6 +152,8 @@ func FileMetaUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
 }
+
+// 删除文件的handler
 func FileDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	filesha1 := r.Form.Get("filehash")
@@ -136,4 +162,45 @@ func FileDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	os.Remove(fmeta.Location)
 	meta.RemoveFileMeta(filesha1)
 	w.WriteHeader(http.StatusOK)
+}
+func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
+	// 1.解析请求参数
+	username := r.Form.Get("username")
+	filehash := r.Form.Get("filehash")
+	filename := r.Form.Get("filename")
+	filesizeStr := r.Form.Get("filesize")
+	filesize, _ := strconv.ParseInt(filesizeStr, 10, 64)
+	// 2.从文件表中查询相同hash的文件记录
+	fileMeta, err := meta.GetFileMetaDB(filehash)
+	if err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	// 3.查不到记录则秒传失败
+	if fileMeta == (meta.FileMeta{}) {
+		resp := util.RespMsg{
+			Code: -1,
+			Msg:  "秒传失败",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	}
+	suc := dblayer.OnUserFileUploadFinished(username, filehash, filename, filesize)
+	if suc {
+		resp := util.RespMsg{
+			Code: 0,
+			Msg:  "秒传成功",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	} else {
+		resp := util.RespMsg{
+			Code: -2,
+			Msg:  "秒传失败,请稍后重试",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	}
+
 }
